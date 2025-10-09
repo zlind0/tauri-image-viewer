@@ -1,22 +1,49 @@
-import BuiltWith from '@/features/built-with'
-import GithubStarButton from '@/features/github-star-button'
+import { useEffect, useState } from 'react'
+import { listen } from '@tauri-apps/api/event'
+import { invoke, convertFileSrc } from '@tauri-apps/api/core'
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 
 export function HomePage() {
+    const [imagePath, setImagePath] = useState<string | null>(null)
+
+    useEffect(() => {
+        invoke<string>('get_initial_file').then((file) => {
+            if (file) {
+                setImagePath(file)
+            }
+        })
+        console.log("init")
+        // ref https://tauri.app/reference/javascript/api/namespacewebviewwindow/#ondragdropevent
+        const unlisten = getCurrentWebview().onDragDropEvent((event) => {
+        if (event.payload.type === 'drop') {
+            const paths = event.payload.paths;
+            console.log('File dropped', paths);
+            if (paths.length>0) {
+                setImagePath(event.payload.paths[0])
+            }
+        } else {
+            console.log('File drop cancelled');
+        }
+        });
+
+        return () => {
+            unlisten.then((fn) => fn())
+        }
+    }, [])
+
     return (
-        <div className="flex h-screen">
-            <div className="m-auto text-center space-y-3">
-                <div className="space-y-3">
-                    <BuiltWith />
-                    <h1 className="text-3xl items-center">
-                        Welcome to Tauri Core template!
-                    </h1>
-                    <p>
-                        This template is a starting point for building Tauri
-                        apps with Vite, React, and Tailwind CSS.
-                    </p>
+        <div className="flex h-screen bg-black">
+            {imagePath ? (
+                <img
+                    src={convertFileSrc(imagePath)}
+                    alt="Opened file"
+                    className="m-auto h-full w-full object-contain"
+                />
+            ) : (
+                <div className="m-auto text-center text-white">
+                    <p>Drop an image file here to open it.</p>
                 </div>
-                <GithubStarButton />
-            </div>
+            )}
         </div>
     )
 }
