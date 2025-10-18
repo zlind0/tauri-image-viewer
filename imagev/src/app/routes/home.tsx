@@ -4,45 +4,79 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import './image-viewer.css';
 
+interface ImageInfo {
+    path: string;
+    shot_at: number;
+}
+
 export function HomePage() {
-    const [imagePath, setImagePath] = useState<string | null>(null)
+    const [imageList, setImageList] = useState<ImageInfo[]>([]);
+    const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+
+    const handleNewImagePath = (path: string) => {
+        invoke<ImageInfo[]>('get_sorted_image_list', { initialPath: path }).then((images) => {
+            setImageList(images);
+            const initialIndex = images.findIndex(img => img.path === path);
+            if (initialIndex !== -1) {
+                setCurrentIndex(initialIndex);
+            }
+        }).catch(console.error);
+    }
 
     useEffect(() => {
         invoke<string>('get_initial_file').then((file) => {
             if (file) {
-                setImagePath(file)
+                handleNewImagePath(file);
             }
         })
-        console.log("init")
-        // ref https://tauri.app/reference/javascript/api/namespacewebviewwindow/#ondragdropevent
+
         const unlisten = getCurrentWebview().onDragDropEvent((event) => {
-        if (event.payload.type === 'drop') {
-            const paths = event.payload.paths;
-            console.log('File dropped', paths);
-            if (paths.length>0) {
-                setImagePath(event.payload.paths[0])
+            if (event.payload.type === 'drop') {
+                const paths = event.payload.paths;
+                if (paths.length > 0) {
+                    handleNewImagePath(paths[0]);
+                }
+            } else {
+                console.log('File drop cancelled');
             }
-        } else {
-            console.log('File drop cancelled');
-        }
         });
 
         return () => {
-            unlisten.then((fn) => fn())
+            unlisten.then((fn) => fn());
         }
     }, [])
 
+    useEffect(() => {
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (currentIndex === null) return;
+
+            if (event.key === 'ArrowRight') {
+                setCurrentIndex((prevIndex) => (prevIndex! + 1) % imageList.length);
+            } else if (event.key === 'ArrowLeft') {
+                setCurrentIndex((prevIndex) => (prevIndex! - 1 + imageList.length) % imageList.length);
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+        };
+    }, [currentIndex, imageList.length]);
+
+    const currentImage = currentIndex !== null ? imageList[currentIndex] : null;
+
     return (
         <div className="flex h-screen w-screen bg-black justify-center items-center" id="DivImgWrapper">
-            {imagePath ? (
+            {currentImage ? (
                 <TransformWrapper 
                     disablePadding={true}>
                     <TransformComponent >
                         <img
-                    src={convertFileSrc(imagePath)}
-                    alt="Opened file"
-                    className="m-auto object-contain max-h-screen max-w-screen"
-                            />
+                            src={convertFileSrc(currentImage.path)}
+                            alt="Opened file"
+                            className="m-auto object-contain max-h-screen max-w-screen"
+                        />
                     </TransformComponent>
                 </TransformWrapper>
                 

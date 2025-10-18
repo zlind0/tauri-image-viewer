@@ -30,7 +30,7 @@
   },
   "productName": "imagev",
   "version": "0.1.0",
-  "identifier": "com.tauri-app.app",
+  "identifier": "com.imagev.app",
   "plugins": {
     "process": {
       "active": true
