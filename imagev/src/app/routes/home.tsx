@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
-import { listen } from '@tauri-apps/api/event'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
+import './image-viewer.css';
 
 export function HomePage() {
     const [imagePath, setImagePath] = useState<string | null>(null)
@@ -33,14 +33,15 @@ export function HomePage() {
     }, [])
 
     return (
-        <div className="flex h-screen bg-black">
+        <div className="flex h-screen w-screen bg-black justify-center items-center" id="DivImgWrapper">
             {imagePath ? (
-                <TransformWrapper>
-                    <TransformComponent>
+                <TransformWrapper 
+                    disablePadding={true}>
+                    <TransformComponent >
                         <img
                     src={convertFileSrc(imagePath)}
                     alt="Opened file"
-                    className="m-auto h-full w-full object-contain"
+                    className="m-auto object-contain max-h-screen max-w-screen"
                             />
                     </TransformComponent>
                 </TransformWrapper>
