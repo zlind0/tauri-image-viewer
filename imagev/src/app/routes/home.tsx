@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
@@ -12,6 +12,7 @@ interface ImageInfo {
 export function HomePage() {
     const [imageList, setImageList] = useState<ImageInfo[]>([]);
     const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
 
     const handleNewImagePath = (path: string) => {
         invoke<ImageInfo[]>('get_sorted_image_list', { initialPath: path }).then((images) => {
@@ -66,17 +67,35 @@ export function HomePage() {
 
     const currentImage = currentIndex !== null ? imageList[currentIndex] : null;
 
+    useEffect(() => {
+        if (currentImage && canvasRef.current) {
+            const canvas = canvasRef.current;
+            const context = canvas.getContext('2d');
+            const image = new Image();
+            image.src = convertFileSrc(currentImage.path);
+            image.onload = () => {
+                const ratio = window.devicePixelRatio || 1;
+                const imageWidth = image.width;
+                const imageHeight = image.height;
+
+                canvas.width = imageWidth * ratio;
+                canvas.height = imageHeight * ratio;
+
+                canvas.style.width = `${imageWidth}px`;
+                canvas.style.height = `${imageHeight}px`;
+
+                context?.drawImage(image, 0, 0, canvas.width, canvas.height);
+            };
+        }
+    }, [currentImage]);
+
     return (
         <div className="flex h-screen w-screen bg-black justify-center items-center" id="DivImgWrapper">
             {currentImage ? (
                 <TransformWrapper 
                     disablePadding={true}>
                     <TransformComponent >
-                        <img
-                            src={convertFileSrc(currentImage.path)}
-                            alt="Opened file"
-                            className="m-auto object-contain max-h-screen max-w-screen"
-                        />
+                        <canvas ref={canvasRef} className="m-auto object-contain max-h-screen max-w-screen" />
                     </TransformComponent>
                 </TransformWrapper>
                 

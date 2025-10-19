@@ -2,3 +2,7 @@
     width: 100vw;
     height: 100vh;
 }
+
+.crisp-image {
+    image-rendering: crisp-edges;
+}
