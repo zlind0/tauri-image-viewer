@@ -50,7 +50,8 @@
         "width": 1000,
         "height": 600,
         "dragDropEnabled": true,
-        "resizable": true
+        "resizable": true,
+        "theme": "Dark"
       }
     ]
   }
