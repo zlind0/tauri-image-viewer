@@ -133,121 +133,131 @@ fn get_image_exif_data(path: String) -> Result<ExifData, String> {
 }
 
 #[tauri::command]
-fn get_sorted_image_list(initial_path: String, app_handle: AppHandle) -> Result<Vec<ImageInfo>, String> {
-    let path = Path::new(&initial_path);
-    let dir = match path.is_dir() {
-        true => path,
-        false => path.parent().ok_or("Could not get parent directory")?,
-    };
+async fn get_sorted_image_list(initial_path: String, app_handle: AppHandle) -> Result<Vec<ImageInfo>, String> {
+    let handle = tauri::async_runtime::spawn_blocking(move || {
+        let path = Path::new(&initial_path);
+        let dir = match path.is_dir() {
+            true => path,
+            false => path.parent().ok_or("Could not get parent directory")?,
+        };
 
-    let mut conn = get_db_connection(&app_handle).map_err(|e| e.to_string())?;
-    let table_name = sanitize_table_name(dir.to_str().unwrap());
+        let mut conn = get_db_connection(&app_handle).map_err(|e| e.to_string())?;
+        let table_name = sanitize_table_name(dir.to_str().unwrap());
 
-    conn.execute(
-        &format!(
-            "CREATE TABLE IF NOT EXISTS {} (\n                filename TEXT PRIMARY KEY,\n                shot_at INTEGER NOT NULL\n            )",
-            table_name
-        ),
-        [],
-    )
-    .map_err(|e| e.to_string())?;
+        conn.execute(
+            &format!(
+                "CREATE TABLE IF NOT EXISTS {} (
+                filename TEXT PRIMARY KEY,
+                shot_at INTEGER NOT NULL
+                )",
+                table_name
+            ),
+            [],
+        )
+        .map_err(|e| e.to_string())?;
 
-    let fs_images = fs::read_dir(dir)
-        .map_err(|e| e.to_string())?
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let path = entry.path();
-            if path.is_file() {
-                let extension = path.extension()?.to_str()?.to_lowercase();
-                if ["jpg", "jpeg", "png", "heif", "heic"].contains(&extension.as_str()) {
-                    return Some(path.file_name()?.to_str()?.to_string());
-                }
-            }
-            None
-        })
-        .collect::<std::collections::HashSet<String>>();
-
-    let db_images: std::collections::HashSet<String> = {
-        let mut stmt = conn
-            .prepare(&format!("SELECT filename FROM {}", table_name))
-            .map_err(|e| e.to_string())?;
-        let x = stmt
-            .query_map([], |row| row.get(0))
+        let fs_images = fs::read_dir(dir)
             .map_err(|e| e.to_string())?
-            .collect::<Result<std::collections::HashSet<String>, _>>()
-            .map_err(|e| e.to_string())?;
-        x
-    };
+            .filter_map(|entry| {
+                let entry = entry.ok()?;
+                let path = entry.path();
+                if path.is_file() {
+                    let extension = path.extension()?.to_str()?.to_lowercase();
+                    if ["jpg", "jpeg", "png", "heif", "heic"].contains(&extension.as_str()) {
+                        return Some(path.file_name()?.to_str()?.to_string());
+                    }
+                }
+                None
+            })
+            .collect::<std::collections::HashSet<String>>();
 
-    let new_images = fs_images.difference(&db_images).cloned().collect::<Vec<String>>();
-    let deleted_images = db_images.difference(&fs_images).cloned().collect::<Vec<String>>();
+        let db_images: std::collections::HashSet<String> = {
+            let mut stmt = conn
+                .prepare(&format!("SELECT filename FROM {}", table_name))
+                .map_err(|e| e.to_string())?;
+            let x = stmt
+                .query_map([], |row| row.get(0))
+                .map_err(|e| e.to_string())?
+                .collect::<Result<std::collections::HashSet<String>, _>>()
+                .map_err(|e| e.to_string())?;
+            x
+        };
 
-    if !deleted_images.is_empty() {
-        let tx = conn.transaction().map_err(|e| e.to_string())?;
-        for image in &deleted_images {
-            tx.execute(
-                &format!("DELETE FROM {} WHERE filename = ?", table_name),
-                params![image],
-            )
-            .map_err(|e| e.to_string())?;
+        let new_images = fs_images.difference(&db_images).cloned().collect::<Vec<String>>();
+        let deleted_images = db_images.difference(&fs_images).cloned().collect::<Vec<String>>();
+
+        if !deleted_images.is_empty() {
+            let tx = conn.transaction().map_err(|e| e.to_string())?;
+            for image in &deleted_images {
+                tx.execute(
+                    &format!("DELETE FROM {} WHERE filename = ?", table_name),
+                    params![image],
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            tx.commit().map_err(|e| e.to_string())?;
         }
-        tx.commit().map_err(|e| e.to_string())?;
-    }
 
-    for image_name in new_images {
-        let image_path = dir.join(&image_name);
-        if let Some(shot_at) = get_shot_at(&image_path) {
-            conn.execute(
-                &format!(
-                    "INSERT OR REPLACE INTO {} (filename, shot_at) VALUES (?, ?)",
-                    table_name
-                ),
-                params![image_name, shot_at],
-            )
-            .map_err(|e| e.to_string())?;
-        } else {
-            // If EXIF data is not available, use file modification time
-            let metadata = fs::metadata(&image_path).map_err(|e| e.to_string())?;
-            if let Ok(modified_time) = metadata.modified() {
-                let datetime: DateTime<Utc> = modified_time.into();
+        for image_name in new_images {
+            let image_path = dir.join(&image_name);
+            if let Some(shot_at) = get_shot_at(&image_path) {
                 conn.execute(
                     &format!(
                         "INSERT OR REPLACE INTO {} (filename, shot_at) VALUES (?, ?)",
                         table_name
                     ),
-                    params![image_name, datetime.timestamp()],
+                    params![image_name, shot_at],
                 )
                 .map_err(|e| e.to_string())?;
+            } else {
+                // If EXIF data is not available, use file modification time
+                let metadata = fs::metadata(&image_path).map_err(|e| e.to_string())?;
+                if let Ok(modified_time) = metadata.modified() {
+                    let datetime: DateTime<Utc> = modified_time.into();
+                    conn.execute(
+                        &format!(
+                            "INSERT OR REPLACE INTO {} (filename, shot_at) VALUES (?, ?)",
+                            table_name
+                        ),
+                        params![image_name, datetime.timestamp()],
+                    )
+                    .map_err(|e| e.to_string())?;
+                }
             }
         }
-    }
 
-    let images = {
-        let mut stmt = conn
-            .prepare(&format!(
-                "SELECT filename, shot_at FROM {} ORDER BY shot_at ASC",
-                table_name
-            ))
-            .map_err(|e| e.to_string())?;
+        let images = {
+            let mut stmt = conn
+                .prepare(&format!(
+                    "SELECT filename, shot_at FROM {} ORDER BY shot_at ASC",
+                    table_name
+                ))
+                .map_err(|e| e.to_string())?;
 
-        let x = stmt
-            .query_map([], |row| {
-                Ok(ImageInfo {
-                    path: dir
-                        .join(row.get::<_, String>(0)?)
-                        .to_str()
-                        .unwrap()
-                        .to_string(),
-                    shot_at: row.get(1)?,
+            let x = stmt
+                .query_map([], |row| {
+                    Ok(ImageInfo {
+                        path: dir
+                            .join(row.get::<_, String>(0)?)
+                            .to_str()
+                            .unwrap()
+                            .to_string(),
+                        shot_at: row.get(1)?,
+                    })
                 })
-            })
-            .map_err(|e| e.to_string())?
-            .collect::<Result<Vec<ImageInfo>, _>>()
-            .map_err(|e| e.to_string())?;
-        x
-    };
+                .map_err(|e| e.to_string())?
+                .collect::<Result<Vec<ImageInfo>, _>>()
+                .map_err(|e| e.to_string())?;
+            x
+        };
 
-    Ok(images)
+        Ok(images)
+    });
+
+    match handle.await {
+        Ok(result) => result,
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 fn main() {
