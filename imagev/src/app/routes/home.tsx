@@ -22,6 +22,7 @@ interface ExifData {
 export function HomePage() {
     const [imageList, setImageList] = useState<ImageInfo[]>([]);
     const [currentIndex, setCurrentIndex] = useState<number | null>(null);
+    const [imageDimensions, setImageDimensions] = useState<{width: number, height: number} | null>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
     const handleNewImagePath = (path: string) => {
@@ -87,6 +88,7 @@ export function HomePage() {
                 const ratio = window.devicePixelRatio || 1;
                 const imageWidth = image.width;
                 const imageHeight = image.height;
+                setImageDimensions({ width: imageWidth, height: imageHeight });
 
                 canvas.width = imageWidth * ratio;
                 canvas.height = imageHeight * ratio;
@@ -105,6 +107,17 @@ export function HomePage() {
             invoke<ExifData>('get_image_exif_data', { path: currentImage.path })
                 .then((exifData) => {
                     const parts: string[] = [];
+                    
+                    const filename = currentImage.path.split('/').pop();
+                    if (filename) {
+                        parts.push(filename);
+                    }
+
+                    if (imageDimensions) {
+                        const megapixels = Math.round((imageDimensions.width * imageDimensions.height) / 1000000);
+                        parts.push(`${megapixels}MP`);
+                    }
+
                     if (exifData.shutter_speed) parts.push(exifData.shutter_speed);
                     if (exifData.aperture) parts.push(exifData.aperture);
                     if (exifData.iso) parts.push(`ISO${exifData.iso}`);
@@ -127,7 +140,7 @@ export function HomePage() {
         } else {
             appWindow.setTitle('imagev'); // Reset title if no image is selected
         }
-    }, [currentImage]);
+    }, [currentImage, imageDimensions]);
 
     return (
         <div className="flex h-screen w-screen bg-black justify-center items-center" id="DivImgWrapper">
