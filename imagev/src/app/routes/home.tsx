@@ -1,12 +1,22 @@
 import { useEffect, useState, useRef } from 'react'
 import { invoke, convertFileSrc } from '@tauri-apps/api/core'
 import { getCurrentWebview } from "@tauri-apps/api/webview";
+import { Window } from '@tauri-apps/api/window';
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 import './image-viewer.css';
 
 interface ImageInfo {
     path: string;
     shot_at: number;
+}
+
+interface ExifData {
+    shutter_speed?: string;
+    aperture?: string;
+    iso?: number;
+    focal_length_35mm?: string;
+    model?: string;
+    date_time_original?: string;
 }
 
 export function HomePage() {
@@ -86,6 +96,36 @@ export function HomePage() {
 
                 context?.drawImage(image, 0, 0, canvas.width, canvas.height);
             };
+        }
+    }, [currentImage]);
+
+    useEffect(() => {
+        const appWindow = Window.getCurrent();
+        if (currentImage) {
+            invoke<ExifData>('get_image_exif_data', { path: currentImage.path })
+                .then((exifData) => {
+                    const parts: string[] = [];
+                    if (exifData.shutter_speed) parts.push(exifData.shutter_speed);
+                    if (exifData.aperture) parts.push(exifData.aperture);
+                    if (exifData.iso) parts.push(`ISO${exifData.iso}`);
+                    if (exifData.focal_length_35mm) parts.push(exifData.focal_length_35mm);
+                    if (exifData.model) parts.push(exifData.model);
+                    if (exifData.date_time_original) {
+                        try {
+                            const date = new Date(exifData.date_time_original.replace(/:/, '-').replace(/:/, '-'));
+                            parts.push(date.toLocaleString());
+                        } catch (e) {
+                            console.error("Error parsing date_time_original", e);
+                            parts.push(exifData.date_time_original);
+                        }
+                    }
+
+                    const title = parts.join('  '); // Two spaces as requested
+                    appWindow.setTitle(title);
+                })
+                .catch(console.error);
+        } else {
+            appWindow.setTitle('imagev'); // Reset title if no image is selected
         }
     }, [currentImage]);
 

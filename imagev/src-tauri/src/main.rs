@@ -21,6 +21,16 @@ struct ImageInfo {
     shot_at: i64, // Unix timestamp
 }
 
+#[derive(Serialize, Deserialize, Debug, Default)]
+struct ExifData {
+    shutter_speed: Option<String>,
+    aperture: Option<String>,
+    iso: Option<u32>,
+    focal_length_35mm: Option<String>,
+    model: Option<String>,
+    date_time_original: Option<String>,
+}
+
 #[tauri::command]
 fn get_initial_file(state: State<AppState>) -> Option<String> {
     state.initial_file.lock().unwrap().take()
@@ -65,6 +75,61 @@ fn get_shot_at(path: &Path) -> Option<i64> {
     }
 
     None
+}
+
+fn get_exif_data(path: &Path) -> Option<ExifData> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut bufreader = std::io::BufReader::new(&file);
+    let exifreader = exif::Reader::new();
+    let exif = exifreader.read_from_container(&mut bufreader).ok()?;
+
+    let mut exif_data = ExifData::default();
+
+    if let Some(field) = exif.get_field(exif::Tag::ExposureTime, exif::In::PRIMARY) {
+        if let Some(value) = field.display_value().to_string().strip_prefix("1/") {
+            exif_data.shutter_speed = Some(format!("1/{}s", value));
+        } else {
+            exif_data.shutter_speed = Some(format!("{}s", field.display_value().to_string()));
+        }
+    }
+
+    if let Some(field) = exif.get_field(exif::Tag::FNumber, exif::In::PRIMARY) {
+        exif_data.aperture = Some(format!("f/{}", field.display_value().to_string()));
+    }
+
+    if let Some(field) = exif.get_field(exif::Tag::PhotographicSensitivity, exif::In::PRIMARY) {
+        if let exif::Value::Short(ref shorts) = field.value {
+            if let Some(iso) = shorts.get(0) {
+                exif_data.iso = Some(*iso as u32);
+            }
+        }
+    }
+
+    if let Some(field) = exif.get_field(exif::Tag::FocalLengthIn35mmFilm, exif::In::PRIMARY) {
+        exif_data.focal_length_35mm = Some(format!("{}mm", field.display_value().to_string()));
+    }
+
+    if let Some(field) = exif.get_field(exif::Tag::Model, exif::In::PRIMARY) {
+        exif_data.model = Some(field.display_value().to_string());
+    }
+
+    if let Some(field) = exif.get_field(exif::Tag::DateTimeOriginal, exif::In::PRIMARY) {
+        if let exif::Value::Ascii(ref ascii) = field.value {
+            if let Some(datetime_str) = ascii.get(0) {
+                if let Ok(datetime_str) = std::str::from_utf8(datetime_str) {
+                    exif_data.date_time_original = Some(datetime_str.trim_end_matches('\0').to_string());
+                }
+            }
+        }
+    }
+
+    Some(exif_data)
+}
+
+#[tauri::command]
+fn get_image_exif_data(path: String) -> Result<ExifData, String> {
+    let image_path = PathBuf::from(path);
+    get_exif_data(&image_path).ok_or_else(|| "Could not get EXIF data".to_string())
 }
 
 #[tauri::command]
@@ -213,7 +278,8 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             get_initial_file,
-            get_sorted_image_list
+            get_sorted_image_list,
+            get_image_exif_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

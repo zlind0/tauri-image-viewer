@@ -1,0 +1,1 @@
+imagev/src/app/routes/home.tsx:75中的这个img中，发现渲染得很模糊，请解决这个问题
